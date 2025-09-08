@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-analysis
+spec:
+  containers:
+  - command:
+    - vllm
+    - serve
+    - Qwen/Qwen3-0.6B
+    image: vllm/vllm-openai:v0.10.1
+    imagePullPolicy: IfNotPresent
+    name: memory-analysis
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "50"
+        nvidia.com/gpumem: "10240"

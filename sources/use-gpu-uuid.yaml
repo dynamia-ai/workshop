@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    nvidia.com/use-gpuuuid: "GPU-57463d96-17d5-e17c-5abe-3ea736b52b73"
+  name: use-gpu-uuid
+spec:
+  containers:
+  - args:
+    - sleep infinity
+    command:
+    - /bin/bash
+    - -c
+    image: ubuntu:latest
+    imagePullPolicy: IfNotPresent
+    name: use-gpu-uuid
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "20"
+        nvidia.com/gpumem: "1024"

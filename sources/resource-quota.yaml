@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: hami-resource-quota
+  namespace: default
+spec:
+  hard:
+    requests.nvidia.com/gpu: "1"
+    requests.nvidia.com/gpucores: "50"
+    requests.nvidia.com/gpumem: "2048"

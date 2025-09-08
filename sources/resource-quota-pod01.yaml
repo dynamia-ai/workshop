@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-quota-demo01
+spec:
+  containers:
+  - args:
+    - sleep infinity
+    command:
+    - /bin/bash
+    - -c
+    image: ubuntu:latest
+    imagePullPolicy: IfNotPresent
+    name: resource-quota-demo01
+    resources:
+      limits:
+        nvidia.com/gpu: "2"
+        nvidia.com/gpucores: "70"
+        nvidia.com/gpumem: "1024"
