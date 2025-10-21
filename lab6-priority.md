@@ -7,41 +7,54 @@ apiVersion: v1
 kind: Pod
 metadata:
   annotations:
-  name: priority
+  name: high-priority
 spec:
   containers:
-  - args:
-    - sleep infinity
-    command:
-    - /bin/bash
-    - -c
-    env:
-      - name: CUDA_TASK_PRIORITY
-        value: '0'
-    image: ubuntu:latest
+  - image: vllm/vllm-openai:latest
     imagePullPolicy: IfNotPresent
     name: high-priority
+    env:
+    - name: CUDA_TASK_PRIORITY
+      value: '0'
+    command:
+    - vllm
+    - serve
+    - Qwen/Qwen3-7B-Instruct
+    - --max-model-len="2048"
+    - --dtype=auto
     resources:
       limits:
         nvidia.com/gpu: "1"
-        nvidia.com/gpucores: "10"
-        nvidia.com/gpumem: "1024"
-  - args:
-    - sleep infinity
-    command:
-    - /bin/bash
-    - -c
-    env:
-      - name: CUDA_TASK_PRIORITY
-        value: '1'
-    image: ubuntu:latest
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "20480"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+  name: low-priority
+spec:
+  containers:
+  - image: vllm/vllm-openai:latest
     imagePullPolicy: IfNotPresent
     name: low-priority
+    env:
+    - name: CUDA_TASK_PRIORITY
+      value: '1'
+    args:
+      - |
+        # Prompt: 写一段关于机器学习的简介（不少于 2000 字）
+        # 结果输出到文档 /data/outputs.json
+        python -m vllm.entrypoints.offline \
+          --model /models/qwen3-7b-instruct \ 
+          --input-file /data/inputs.txt \     
+          --output-file /data/outputs.json \ 
+          --temperature 0.7
     resources:
       limits:
         nvidia.com/gpu: "1"
-        nvidia.com/gpucores: "10"
-        nvidia.com/gpumem: "1024"
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "20480"
 ```
 
 下面是高优先级和低优先级工作负载运行算力使用的趋势图：

@@ -16,14 +16,19 @@ spec:
     spec:
       containers:
       - args:
-        - sleep infinity
+        - while :; do /app/gpu_burn 300 || true; sleep 300; done
         command:
-        - /bin/bash
-        - -c
-        image: ubuntu:latest
+        - /bin/sh
+        - -lc
+        image: oguzpastirmaci/gpu-burn:latest
+        imagePullPolicy: IfNotPresent
         name: main
         resources:
           limits:
+            nvidia.com/gpu: "1"
+            nvidia.com/gpucores: "10"
+            nvidia.com/gpumem: "1024"
+          requests:
             nvidia.com/gpu: "1"
             nvidia.com/gpucores: "10"
             nvidia.com/gpumem: "1024"
