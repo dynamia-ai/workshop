@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    kantaloupeflow-name: vllm-qwen3-4b-tp
+  name: vllm-qwen-4b-tp
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      kantaloupeflow-name: vllm-qwen-4b-tp
+  template:
+    metadata:
+      labels:
+        kantaloupeflow-name: vllm-qwen-4b-tp
+    spec:
+      containers:
+      - command:
+        - vllm
+        - serve
+        - Qwen/Qwen3-4B
+        - --dtype=auto
+        - --tensor-parallel-size=2
+        - --max-model-len=1024
+        - --enforce-eager
+        env:
+        - name: LIBCUDA_LOG_LEVEL
+          value: "2"
+        - name: GPU_CORE_UTILIZATION_POLICY
+          value: force
+        image: vllm/vllm-openai:latest
+        imagePullPolicy: IfNotPresent
+        name: main
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+            nvidia.com/gpu: "2"
+            nvidia.com/gpucores: "50"
+            nvidia.com/gpumem: "10240"
+            nvidia.com/priority: "1"
+          requests:
+            cpu: "2"
+            memory: 4Gi
+            nvidia.com/gpu: "2"
+            nvidia.com/gpucores: "50"
+            nvidia.com/gpumem: "10240"
+            nvidia.com/priority: "1"

@@ -19,7 +19,7 @@ spec:
     command:
     - vllm
     - serve
-    - Qwen/Qwen3-7B-Instruct
+    - Qwen/Qwen3-8B
     - --max-model-len="2048"
     - --dtype=auto
     resources:
