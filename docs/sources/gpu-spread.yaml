@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-spread
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app-name: gpu-spread
+  template:
+    metadata:
+      annotations:
+        hami.io/gpu-scheduler-policy: spread
+      labels:
+        app-name: gpu-spread
+    spec:
+      containers:
+      - args:
+        - sleep infinity
+        command:
+        - /bin/bash
+        - -c
+        image: ubuntu:latest
+        name: main
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+            nvidia.com/gpucores: "10"
+            nvidia.com/gpumem: "1024"

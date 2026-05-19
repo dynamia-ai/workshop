@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-leader
+  namespace: kueue-test
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+    kueue.x-k8s.io/pod-group-name: "sample-group"
+  annotations:
+    kueue.x-k8s.io/pod-group-total-count: "2"
+spec:
+  restartPolicy: Never
+  containers:
+  - args:
+    - while :; do /app/gpu_burn 300 || true; sleep 300; done
+    command:
+    - /bin/sh
+    - -lc
+    env:
+    - name: LIBCUDA_LOG_LEVEL
+      value: "2"
+    image: oguzpastirmaci/gpu-burn:latest
+    imagePullPolicy: IfNotPresent
+    name: main
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "1024"
+      requests:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "1024"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-worker
+  namespace: kueue-test
+  labels:
+    kueue.x-k8s.io/queue-name: user-queue
+    kueue.x-k8s.io/pod-group-name: "sample-group"
+  annotations:
+    kueue.x-k8s.io/pod-group-total-count: "2"
+spec:
+  restartPolicy: Never
+  containers:
+  - args:
+    - while :; do /app/gpu_burn 300 || true; sleep 300; done
+    command:
+    - /bin/sh
+    - -lc
+    env:
+    - name: LIBCUDA_LOG_LEVEL
+      value: "2"
+    image: oguzpastirmaci/gpu-burn:latest
+    imagePullPolicy: IfNotPresent
+    name: main
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "1024"
+      requests:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "30"
+        nvidia.com/gpumem: "1024"

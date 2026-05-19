@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    kantaloupeflow-name: llama-factory
+  name: llama-factory
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      kantaloupeflow-name: llama-factory
+  template:
+    metadata:
+      labels:
+        kantaloupeflow-name: llama-factory
+    spec:
+      containers:
+      - command:
+        - llamafactory-cli
+        - train
+        - examples/train_lora/qwen2_5vl_lora_sft.yaml
+        image: hiyouga/llamafactory:latest
+        imagePullPolicy: IfNotPresent
+        name: main
+        resources:
+          limits:
+            cpu: "2"
+            memory: 8Gi
+            nvidia.com/gpu: "1"
+            nvidia.com/gpucores: "50"
+            nvidia.com/gpumem: "30720"
+            nvidia.com/priority: "1"
+          requests:
+            cpu: "2"
+            memory: 8Gi
+            nvidia.com/gpu: "1"
+            nvidia.com/gpucores: "50"
+            nvidia.com/gpumem: "30720"
+            nvidia.com/priority: "1"

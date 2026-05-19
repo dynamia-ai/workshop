@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    nvidia.com/use-gputype: "NVIDIA-NVIDIA L4"
+  name: use-gpu-type
+spec:
+  containers:
+  - args:
+    - sleep infinity
+    command:
+    - /bin/bash
+    - -c
+    image: ubuntu:latest
+    imagePullPolicy: IfNotPresent
+    name: use-gpu-type
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpucores: "20"
+        nvidia.com/gpumem: "1024"

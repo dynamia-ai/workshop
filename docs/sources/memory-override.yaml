@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-override
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app-name: memory-override
+  template:
+    metadata:
+      annotations:
+        nvidia.com/use-gpuuuid: GPU-8b644fb4-b7e8-56df-3fda-912e3a5c643c
+      labels:
+        app-name: memory-override
+    spec:
+      containers:
+      - args:
+        - sleep infinity
+        command:
+        - /bin/bash
+        - -c
+        image: ubuntu:latest
+        name: main
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+            nvidia.com/gpucores: "10"
+            nvidia.com/gpumem: "1240"

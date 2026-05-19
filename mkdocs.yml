@@ -1,0 +1,61 @@
+site_name: HAMi 实验室
+theme:
+  name: material
+  language: zh
+  palette:
+    - scheme: default
+      primary: green
+      toggle:
+        icon: material/brightness-7
+        name: 切换暗色模式
+    - scheme: slate
+      primary: green
+      toggle:
+        icon: material/brightness-4
+        name: 切换亮色模式
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.expand
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - 首页: index.md
+  - 概念:
+    - GPU 软件栈全景: concepts/gpu-stack.md
+    - 理解 GPU 驱动: concepts/gpu-driver.md
+    - HAMi 集群架构: concepts/hami-architecture.md
+  - 安装:
+    - "实验1: 在线安装 HAMi": installation/online-install.md
+  - 基础:
+    - "实验2: 开启 GPU 节点": basics/enable-gpu.md
+    - "实验3: GPU 共享": basics/gpu-sharing.md
+    - "实验4: 指定卡调度": basics/specified-card.md
+  - 调度:
+    - "实验5: Binpack/Spread 策略": scheduling/binpack-spread.md
+    - "实验6: 优先级调度": scheduling/priority.md
+  - 进阶:
+    - "实验7: 显存自动扩缩容": advanced/memory-scaling.md
+    - "实验8: GPU 资源配额": advanced/resource-quota.md
+    - "实验9: 显存分析": advanced/memory-analysis.md
+    - "实验10: 显存覆盖": advanced/memory-override.md
+  - 监控:
+    - "实验11: 监控": monitoring/monitor.md
+  - 配置:
+    - "实验12: 全局配置": configuration/configuration.md
+  - 考核: exam.md
+  - FAQ: faq.md
+
+extra_css:
+  - stylesheets/extra.css
