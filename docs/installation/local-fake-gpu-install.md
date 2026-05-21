@@ -1,6 +1,6 @@
 # 实验 1A: mac 本地 Fake GPU 安装 HAMi
 
-本实验将在 macOS 上使用 Docker Desktop、kind 和 [run-ai/fake-gpu-operator](https://github.com/run-ai/fake-gpu-operator) 搭建一个纯本地 Kubernetes 集群，然后在线安装 HAMi。
+本实验将在 macOS 上使用 OrbStack 自带 Kubernetes 和 [run-ai/fake-gpu-operator](https://github.com/run-ai/fake-gpu-operator) 搭建一个纯本地 Kubernetes 集群，然后在线安装 HAMi。
 
 这个实验不需要真实 NVIDIA GPU，适合用于课堂预习、讲解 HAMi 组件组成、验证 GPU Pod 调度流程，以及在个人电脑上快速熟悉 HAMi 的基础使用方式。
 
@@ -21,103 +21,112 @@
 
 ```mermaid
 flowchart LR
-    Step1["步骤1<br/>安装本地工具"] --> Step2["步骤2<br/>创建 kind 集群"]
-    Step2 --> Step3["步骤3<br/>安装 fake-gpu-operator"]
-    Step3 --> Step4["步骤4<br/>安装 HAMi"]
-    Step4 --> Step5["步骤5<br/>运行模拟 GPU 工作负载"]
+    Step1["步骤1<br/>确认本地环境"] --> Step2["步骤2<br/>安装 fake-gpu-operator"]
+    Step2 --> Step3["步骤3<br/>安装 HAMi"]
+    Step3 --> Step4["步骤4<br/>运行模拟 GPU 工作负载"]
+    Step4 --> Step5["步骤5<br/>观察 HAMi 和 fake GPU"]
 ```
 
 | 步骤 | 目的 | 解决什么问题 |
 | ------ | ------ | ------------- |
-| 安装本地工具 | 准备 Docker、kubectl、Helm、kind | 在 mac 上创建和管理本地 Kubernetes |
-| 创建 kind 集群 | 启动一个单节点 Kubernetes | 给 HAMi 和 fake-gpu-operator 提供运行环境 |
+| 确认本地环境 | 检查 OrbStack、kubectl、Helm | 确保 Kubernetes 集群可用 |
 | 安装 fake-gpu-operator | 模拟 NVIDIA GPU 资源 | 让无 GPU 节点也能上报 `nvidia.com/gpu` |
 | 安装 HAMi | 部署 HAMi 控制面 | 观察 HAMi scheduler、webhook 等组件 |
 | 运行模拟 GPU 工作负载 | 验证调度链路 | 体验 Pod 申请 GPU 后被调度运行 |
+| 观察 HAMi 和 fake GPU | 理解组件职责边界 | 明确哪些能力需要真实 GPU |
 
 ## 前提条件
 
 - macOS，Intel 或 Apple Silicon 均可
-- 已安装 Docker Desktop，并确保 Docker Desktop 正在运行
-- 能访问 GitHub、GHCR、Docker Hub 和 HAMi Helm 仓库
+- 已安装 [OrbStack](https://orbstack.dev/) 并启用内置 Kubernetes
+- 能访问 GitHub、GHCR 和 HAMi Helm 仓库
 - 本机至少 4 CPU、8 GB 内存可用于实验
 
-安装命令行工具：
+> **为什么用 OrbStack？** OrbStack 自带 Kubernetes（基于 k3s），无需额外安装 kind 或 Docker Desktop。资源占用更少，启动更快，macOS 上做本地实验首选。
+
+## 步骤 1: 确认本地环境
+
+先检查 Kubernetes 集群是否正常运行。
+
+检查集群版本：
 
 ```bash
-brew install kubectl helm kind
+kubectl version
 ```
 
-验证工具：
+输出示例：
 
-```bash
-docker version
-kubectl version --client
-helm version
-kind version
+```plaintext
+Client Version: v1.33.9
+Kustomize Version: v5.6.0
+Server Version: v1.33.9+orb1
 ```
 
-## 步骤 1: 创建 kind 集群
+> `Server Version` 中带有 `orb1` 后缀，说明这是 OrbStack 内置的 Kubernetes。Client 和 Server 版本一致即可。
 
-### 目的
-
-kind 使用 Docker 容器模拟 Kubernetes 节点。macOS 本身不能直接运行 Linux kubelet，kind 会在 Docker Desktop 中启动一个 Linux 节点容器。
-
-### 操作
-
-创建集群配置文件：
-
-```bash
-cat > kind-hami-fake-gpu.yaml <<'EOF'
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-EOF
-```
-
-创建集群：
-
-```bash
-kind create cluster --name hami-fake-gpu --config kind-hami-fake-gpu.yaml
-```
-
-验证节点状态：
+查看集群节点：
 
 ```bash
 kubectl get nodes -o wide
 ```
 
-预期输出中 `STATUS` 为 `Ready`：
+输出示例：
 
 ```plaintext
-NAME                          STATUS   ROLES           AGE   VERSION
-hami-fake-gpu-control-plane   Ready    control-plane   1m    v1.31.x
+NAME       STATUS   ROLES                  AGE    VERSION        INTERNAL-IP     EXTERNAL-IP   OS-IMAGE   KERNEL-VERSION                             CONTAINER-RUNTIME
+orbstack   Ready    control-plane,master   148d   v1.33.9+orb1   192.168.139.2   <none>        OrbStack   7.0.5-orbstack-00330-ge3df4e19b0a0-dirty   docker://29.4.0
 ```
+
+> 节点名称 `orbstack`，角色 `control-plane,master`，这是单节点集群——同时充当控制面和工作节点。`STATUS` 为 `Ready` 说明集群正常。
+
+检查 Helm（后面安装 fake-gpu-operator 和 HAMi 都需要）：
+
+```bash
+helm version
+```
+
+输出示例：
+
+```plaintext
+version.BuildInfo{Version:"v4.2.0", ...}
+```
+
+> Helm 3.x 即可。如果 Helm 未安装，执行 `brew install helm`。
 
 ## 步骤 2: 安装 fake-gpu-operator
 
-### 目的
-
 fake-gpu-operator 会在没有 NVIDIA GPU 的节点上模拟 GPU 资源，并把节点容量写成 `nvidia.com/gpu`。这一步替代了真实 GPU 环境中的 NVIDIA GPU Operator、驱动、device-plugin 和 DCGM 指标采集链路。
 
-### 操作
-
-创建命名空间并开启 privileged Pod Security：
+### 2.1 创建命名空间并设置安全策略
 
 ```bash
 kubectl create namespace gpu-operator
 kubectl label namespace gpu-operator pod-security.kubernetes.io/enforce=privileged
 ```
 
-给 kind 节点打 fake GPU 节点池标签：
+```plaintext
+namespace/gpu-operator created
+namespace/gpu-operator labeled
+```
+
+> `gpu-operator` 命名空间专门放 fake-gpu-operator 相关组件。`privileged` 标签允许 Pod 以特权模式运行——fake-gpu-operator 的 device-plugin 需要访问宿主机设备文件。
+
+### 2.2 给节点打标签
+
+fake-gpu-operator 通过节点标签来决定在哪些节点上模拟 GPU：
 
 ```bash
 NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 kubectl label node ${NODE_NAME} run.ai/simulated-gpu-node-pool=default
 ```
 
-安装 fake-gpu-operator：
+```plaintext
+node/orbstack labeled
+```
+
+> 标签 `run.ai/simulated-gpu-node-pool=default` 告诉 fake-gpu-operator："在这个节点上模拟 GPU"。这是 fake-gpu-operator 的节点选择器机制。
+
+### 2.3 安装 fake-gpu-operator
 
 ```bash
 export FAKE_GPU_OPERATOR_VERSION=0.0.80
@@ -129,29 +138,89 @@ helm upgrade -i gpu-operator \
     --version ${FAKE_GPU_OPERATOR_VERSION}
 ```
 
-> `0.0.80` 是 fake-gpu-operator 在 2026-04-12 发布的稳定版本。后续实验时可以从 fake-gpu-operator 的 GitHub Releases 页面选择更新版本。官方 README 使用 OCI Helm Chart：`oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator`。
+```plaintext
+Release "gpu-operator" does not exist. Installing it now.
+Pulled: ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator:0.0.80
+Digest: sha256:...
+NAME: gpu-operator
+LAST DEPLOYED: ...
+NAMESPACE: gpu-operator
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+```
 
-等待组件运行：
+> `helm upgrade -i` = 如果 release 不存在则安装，存在则升级。`oci://` 前缀表示从 GitHub Container Registry 拉取 Helm Chart。`0.0.80` 是 2026-04 发布的稳定版本。
+
+### 2.4 等待组件运行
 
 ```bash
 kubectl get pods -n gpu-operator
 ```
 
-查看节点是否出现模拟 GPU：
+输出示例：
+
+```plaintext
+NAME                                       READY   STATUS    RESTARTS   AGE
+device-plugin-l8m6j                        1/1     Running   0          31m
+kwok-gpu-device-plugin-5996cdf4f9-mfvpm    1/1     Running   0          31m
+nvidia-dcgm-exporter-knfsn                 1/1     Running   0          31m
+nvidia-dcgm-exporter-kwok-b8fd4976-blb8c   1/1     Running   0          31m
+status-updater-59965d7bc6-fbkmk            1/1     Running   0          31m
+topology-server-9d57b6c79-7dv6h            1/1     Running   0          31m
+```
+
+> 各组件说明：
+>
+> - `device-plugin`：DaemonSet，在每个 GPU 节点上运行，向 Kubernetes 上报 GPU 资源
+> - `kwok-gpu-device-plugin`：用 KWOK（Kubernetes WithOut Kubelet）模拟 GPU 设备
+> - `nvidia-dcgm-exporter`：模拟 DCGM 指标导出（GPU 温度、利用率等）
+> - `status-updater`：更新节点 GPU 状态
+> - `topology-server`：管理 GPU 拓扑信息
+
+如果所有 Pod 都 `Running` 且 `READY` 为 `1/1`，说明安装成功。
+
+### 2.5 验证模拟 GPU 资源
+
+检查节点是否上报了 GPU 容量：
 
 ```bash
 kubectl get node ${NODE_NAME} \
     -o custom-columns=NAME:.metadata.name,GPU:.status.capacity.nvidia\\.com/gpu
 ```
 
-预期输出：
-
 ```plaintext
-NAME                          GPU
-hami-fake-gpu-control-plane   2
+NAME       GPU
+orbstack   2
 ```
 
-如果 `GPU` 为空，检查节点标签是否正确：
+> `GPU` 列显示 `2`，说明 fake-gpu-operator 已经在节点上模拟了 2 块 GPU。这个数字可以在 fake-gpu-operator 配置中调整。
+
+进一步查看节点的 GPU 详细标签：
+
+```bash
+kubectl get node ${NODE_NAME} --show-labels | tr ',' '\n' | grep -E 'nvidia.com/gpu|run.ai'
+```
+
+```plaintext
+nvidia.com/gpu.count=2
+nvidia.com/gpu.deploy.dcgm-exporter=true
+nvidia.com/gpu.deploy.device-plugin=true
+nvidia.com/gpu.memory=11441
+nvidia.com/gpu.present=true
+nvidia.com/gpu.product=Tesla-K80
+run.ai/fake.gpu=true
+run.ai/simulated-gpu-node-pool=default
+```
+
+> 这些标签模拟了一台真实 GPU 节点的信息：
+>
+> - `nvidia.com/gpu.count=2`：模拟 2 块 GPU
+> - `nvidia.com/gpu.product=Tesla-K80`：模拟 GPU 型号为 Tesla K80
+> - `nvidia.com/gpu.memory=11441`：模拟每块 GPU 有 11441 MiB 显存
+> - `run.ai/fake.gpu=true`：标记这是模拟 GPU
+
+如果 `GPU` 列为空，检查节点标签：
 
 ```bash
 kubectl get node ${NODE_NAME} --show-labels | grep run.ai/simulated-gpu-node-pool
@@ -159,26 +228,29 @@ kubectl get node ${NODE_NAME} --show-labels | grep run.ai/simulated-gpu-node-poo
 
 ## 步骤 3: 安装 HAMi
 
-### 目的
+本步骤安装 HAMi 的控制面组件：
 
-本步骤安装 HAMi 的控制面组件，用于观察 HAMi 在 Kubernetes 中的组成：
-
-- `hami-scheduler`：调度增强组件
+- `hami-scheduler`：调度增强组件，参与 GPU Pod 的调度决策
 - admission webhook：自动改写 GPU Pod 的调度器配置
 - Helm release：统一管理 HAMi 相关 Kubernetes 资源
 
 在 fake GPU 环境中，GPU 资源由 fake-gpu-operator 提供。为了避免两个 device-plugin 同时注册 `nvidia.com/gpu`，本实验不让 HAMi device-plugin 接管 fake 节点。
 
-### 操作
-
-添加 HAMi Helm 仓库：
+### 3.1 添加 HAMi Helm 仓库
 
 ```bash
 helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm repo update
 ```
 
-安装 HAMi：
+```plaintext
+"hami-charts" has been added to your repositories
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "hami-charts" chart repository
+Update Complete. ⎈Happy Helming!⎈
+```
+
+### 3.2 安装 HAMi
 
 ```bash
 helm install hami hami-charts/hami \
@@ -186,46 +258,76 @@ helm install hami hami-charts/hami \
     --set devicePlugin.enabled=false
 ```
 
-验证 HAMi 组件：
+```plaintext
+NAME: hami
+LAST DEPLOYED: ...
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+```
+
+> `--set devicePlugin.enabled=false` 是关键参数。因为 fake-gpu-operator 已经在管理 GPU 设备，如果 HAMi 的 device-plugin 也启动，两个组件会冲突。所以这里只安装 HAMi 的调度增强组件。
+
+### 3.3 验证 HAMi 组件
 
 ```bash
 kubectl get pods -n kube-system | grep hami
 ```
 
-预期至少看到 `hami-scheduler` 处于 `Running`：
-
 ```plaintext
-hami-scheduler-xxxxxxxxxx-xxxxx   1/1   Running   0   1m
+hami-scheduler-5d9678f989-dnf65          2/2     Running   0             28m
 ```
 
-查看 Helm Release：
+> `2/2` 表示这个 Pod 里有 2 个容器（scheduler 容器 + webhook 容器），都运行正常。
+
+查看 HAMi 安装的控制面资源：
+
+```bash
+kubectl get deploy,svc,cm,sa -n kube-system | grep hami
+```
+
+```plaintext
+deployment.apps/hami-scheduler           1/1     1            1           28m
+service/hami-scheduler   NodePort    192.168.194.156   <none>        443:31998/TCP,31993:31993/TCP   28m
+configmap/hami-scheduler                                         1      28m
+configmap/hami-scheduler-device                                  1      28m
+serviceaccount/hami-scheduler                                0         28m
+```
+
+> 各资源说明：
+>
+> - `deployment.apps/hami-scheduler`：HAMi 调度器 Deployment
+> - `service/hami-scheduler`：调度器 Service，`NodePort` 类型，端口 `31998`（webhook）和 `31993`（调度）
+> - `configmap/hami-scheduler`：调度器配置
+> - `configmap/hami-scheduler-device`：设备配置
+> - `serviceaccount/hami-scheduler`：调度器使用的服务账号
+
+### 3.4 确认所有 Helm Release
 
 ```bash
 helm list -A
 ```
 
-预期看到：
-
 ```plaintext
-NAME           NAMESPACE      STATUS
-gpu-operator   gpu-operator   deployed
-hami           kube-system    deployed
+NAME         NAMESPACE    REVISION UPDATED                              STATUS   CHART                    APP VERSION
+gpu-operator gpu-operator 1        2026-05-21 16:12:01.872099 +0800 CST deployed fake-gpu-operator-0.0.80 0.0.80     
+hami         kube-system  1        2026-05-21 16:15:24.295479 +0800 CST deployed hami-2.9.0               2.9.0
 ```
 
-## 步骤 4: 运行模拟 GPU 工作负载
+> 两个 Helm Release 都 `deployed`。`gpu-operator` 在 `gpu-operator` 命名空间，`hami` 在 `kube-system` 命名空间。
 
-### 目的
+## 步骤 4: 运行模拟 GPU 工作负载
 
 验证 Kubernetes 可以把申请 `nvidia.com/gpu` 的 Pod 调度到 fake GPU 节点。fake-gpu-operator 会为 GPU Pod 注入模拟 `nvidia-smi` 工具，便于观察 GPU 可见性。
 
 由于本实验没有启用 HAMi device-plugin，HAMi 不会写入真实环境中的 `hami.io/node-nvidia-register` 节点注册信息。因此测试 Pod 会显式绕过 HAMi webhook，使用 Kubernetes 默认调度器和 fake-gpu-operator 提供的模拟 GPU 资源。
 
-### 操作
+### 4.1 创建测试 Pod
 
-创建测试 Pod：
+先看一下 Pod YAML：
 
-```bash
-cat > fake-gpu-pod.yaml <<'EOF'
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -248,67 +350,166 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-EOF
+```
 
+> YAML 要点：
+>
+> - `hami.io/webhook: ignore` 标签：告诉 HAMi webhook 不要拦截这个 Pod，使用默认调度器
+> - `run.ai/simulated-gpu-utilization: "10-30"` 注解：fake-gpu-operator 会让 `nvidia-smi` 报告 10%-30% 的 GPU 利用率
+> - `resources.limits.nvidia.com/gpu: 1`：申请 1 块 GPU
+> - `sleep 3600`：让容器保持运行 1 小时，方便我们进入容器观察
+
+创建 Pod：
+
+```bash
 kubectl apply -f fake-gpu-pod.yaml
 ```
 
-等待 Pod 运行：
+```plaintext
+pod/fake-gpu-pod created
+```
+
+### 4.2 等待 Pod 运行
 
 ```bash
 kubectl get pod fake-gpu-pod -o wide
 ```
 
-预期输出中 `STATUS` 为 `Running`，`NODE` 为 kind 节点：
-
 ```plaintext
-NAME           READY   STATUS    NODE
-fake-gpu-pod   1/1     Running   hami-fake-gpu-control-plane
+NAME           READY   STATUS    RESTARTS   AGE   IP               NODE       NOMINATED NODE   READINESS GATES
+fake-gpu-pod   1/1     Running   0          7m    192.168.194.22   orbstack   <none>           <none>
 ```
 
-查看 Pod 的 GPU 资源申请：
+> `STATUS` 为 `Running`，`NODE` 为 `orbstack`，说明 Pod 成功调度到本地节点。如果第一次拉取 `ubuntu:22.04` 镜像，可能需要几十秒。
+
+### 4.3 查看 Pod 的 GPU 资源申请
 
 ```bash
-kubectl describe pod fake-gpu-pod | grep -A6 Limits
+kubectl describe pod fake-gpu-pod | grep -A6 "Limits"
 ```
-
-预期看到：
 
 ```plaintext
-Limits:
-  nvidia.com/gpu:  1
+    Limits:
+      nvidia.com/gpu:  1
+    Requests:
+      nvidia.com/gpu:  1
+    Environment:
+      NODE_NAME:   (v1:spec.nodeName)
 ```
 
-执行模拟 `nvidia-smi`：
+> `Limits` 和 `Requests` 都是 `nvidia.com/gpu: 1`，说明这个 Pod 申请了 1 块 GPU。Kubernetes 只在 requests 和 limits 都设置了 `nvidia.com/gpu` 时才会把 Pod 调度到有 GPU 的节点。
+
+### 4.4 查看节点的 GPU 资源分配情况
 
 ```bash
-kubectl exec -it fake-gpu-pod -- nvidia-smi
+kubectl describe node ${NODE_NAME} | grep -A10 "Allocated resources"
 ```
 
-如果输出中能看到模拟 GPU 信息，说明 fake-gpu-operator 注入成功。
+```plaintext
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                750m (7%)    1700m (17%)
+  memory             870Mi (10%)  1996Mi (24%)
+  ephemeral-storage  0 (0%)       0 (0%)
+  nvidia.com/gpu     1            1
+```
+
+> `nvidia.com/gpu` 列显示 Requests 和 Limits 都是 `1`，说明已经有 1 块 GPU 被这个 Pod 占用。节点总共有 2 块 GPU，还可以再分配 1 块给其他 Pod。
+
+### 4.5 执行模拟 nvidia-smi
+
+这是最关键的验证步骤——在 Pod 内执行 `nvidia-smi`，看 fake-gpu-operator 是否成功注入了模拟 GPU 工具：
+
+```bash
+kubectl exec fake-gpu-pod -- nvidia-smi
+```
+
+```plaintext
+Thu May 21 08:44:31 2026
++------------------------------------------------------------------------------+
+| NVIDIA-SMI 470.129.06   Driver Version: 470.129.06   CUDA Version: 11.4      |
++--------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                |                      |               MIG M. |
++--------------------------------+----------------------+----------------------+
+|   0  Tesla-K80             Off | 00000001:00:00.0 Off |                  Off |
+| N/A   33C    P8    11W /  70W  |  11441MiB / 11441MiB |      18%     Default |
+|                                |                      |                  N/A |
++--------------------------------+----------------------+----------------------+
+
++------------------------------------------------------------------------------+
+| Processes:                                                                   |
+|  GPU   GI   CI        PID   Type   Process name                  GPU Memory  |
+|        ID   ID                                                   Usage       |
++------------------------------------------------------------------------------+
+|    0   N/A  N/A       23       G   sleep 3600                       11441MiB |
++------------------------------------------------------------------------------+
+```
+
+> 输出解读：
+>
+> - **Driver Version: 470.129.06**：模拟的 NVIDIA 驱动版本
+> - **CUDA Version: 11.4**：模拟支持的 CUDA 版本
+> - **GPU 0: Tesla-K80**：模拟的 GPU 型号，与节点标签 `nvidia.com/gpu.product=Tesla-K80` 一致
+> - **11441MiB / 11441MiB**：显存使用/总量，与节点标签 `nvidia.com/gpu.memory=11441` 一致
+> - **GPU-Util: 18%**：GPU 利用率，在注解 `run.ai/simulated-gpu-utilization: "10-30"` 指定的范围内
+> - **Processes: sleep 3600, 11441MiB**：显示当前进程占用的 GPU 显存
+
+> 这就是 fake-gpu-operator 的核心能力：在没有物理 GPU 的机器上，让容器看到 "好像有一块 GPU" 的环境。`nvidia-smi` 输出的所有数据都是模拟的。
 
 ## 步骤 5: 观察 HAMi 和 fake GPU 的边界
 
 ### HAMi 在本实验中负责什么
 
-执行：
-
 ```bash
 kubectl get deploy,svc,cm,sa -n kube-system | grep hami
 ```
 
-你会看到 HAMi 的控制面资源。它们说明 HAMi 已经作为 Kubernetes 调度增强组件安装进集群。
+```plaintext
+deployment.apps/hami-scheduler           1/1     1            1           28m
+service/hami-scheduler   NodePort    192.168.194.156   <none>        443:31998/TCP,31993:31993/TCP   28m
+configmap/hami-scheduler                                         1      28m
+configmap/hami-scheduler-device                                  1      28m
+serviceaccount/hami-scheduler                                0         28m
+```
+
+> HAMi 在本实验中只部署了调度器（scheduler）。由于设置了 `devicePlugin.enabled=false`，HAMi 的 device-plugin 并未运行。这意味着 HAMi 的核心 GPU 切分能力没有启用。
 
 ### fake-gpu-operator 在本实验中负责什么
 
-执行：
-
 ```bash
 kubectl get daemonset,deploy,pod -n gpu-operator
-kubectl describe node ${NODE_NAME} | grep -A5 "Capacity"
 ```
 
-你会看到 fake-gpu-operator 负责模拟设备发现和 `nvidia.com/gpu` 节点容量。
+```plaintext
+NAME                                  DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR                                    AGE
+daemonset.apps/device-plugin          1         1         1       1            1           nvidia.com/gpu.deploy.device-plugin=true         31m
+daemonset.apps/mig-faker              0         0         0       0            0           node-role.kubernetes.io/runai-dynamic-mig=true   31m
+daemonset.apps/nvidia-dcgm-exporter   1         1         1       1            1           nvidia.com/gpu.deploy.dcgm-exporter=true         31m
+...
+```
+
+> fake-gpu-operator 负责模拟设备的整个生命周期：设备发现、资源上报、指标导出。它在模拟真实 GPU Operator 的行为。
+
+查看节点容量：
+
+```bash
+kubectl describe node ${NODE_NAME} | grep -A10 "Capacity:"
+```
+
+```plaintext
+Capacity:
+  cpu:                10
+  ephemeral-storage:  148577276Ki
+  memory:             8185404Ki
+  nvidia.com/gpu:     2
+  pods:               110
+```
+
+> `nvidia.com/gpu: 2` 出现在节点容量中，说明 fake-gpu-operator 成功注册了模拟 GPU 资源。Kubernetes 调度器会把这个节点视为有 2 块 GPU 的节点。
 
 ### 这个实验不能验证什么
 
@@ -331,12 +532,25 @@ kubectl describe node ${NODE_NAME} | grep -A5 "Capacity"
 kubectl delete pod fake-gpu-pod
 ```
 
-删除本地集群：
+```plaintext
+pod "fake-gpu-pod" deleted
+```
+
+卸载 HAMi：
 
 ```bash
-kind delete cluster --name hami-fake-gpu
+helm uninstall hami -n kube-system
 ```
+
+卸载 fake-gpu-operator：
+
+```bash
+helm uninstall gpu-operator -n gpu-operator
+kubectl delete namespace gpu-operator
+```
+
+> 如果想保留环境继续实验，可以跳过清理。HAMi 和 fake-gpu-operator 占用资源不多。
 
 ## 下一步
 
-完成本实验后，建议继续阅读 [HAMi 集群架构](../concepts/hami-architecture.md)，重点理解 scheduler、device-plugin、webhook 和 GPU Operator 的职责边界。
+完成本实验后，建议继续阅读 [HAMi 集群架构](../concepts/hami-architecture.md)，重点理解 scheduler、device-plugin、webhook 和 GPU Operator 的职责边界
