@@ -16,6 +16,7 @@
 | 章节 | 实验 | 说明 |
 | ------ | ------ | ------ |
 | 安装 | 实验 1: 在线安装 HAMi | GCP 单节点集群在线安装 HAMi |
+| 安装 | 实验 1A: mac 本地 Fake GPU 安装 HAMi | mac 上使用 kind 和 fake-gpu-operator 体验 HAMi 基础组件 |
 | 基础 | 实验 2: 开启 GPU 节点 | 在节点上启用 HAMi GPU 功能 |
 | 基础 | 实验 3: GPU 共享 | 显存和算力切分 |
 | 基础 | 实验 4: 指定卡调度 | UUID/类型过滤 |

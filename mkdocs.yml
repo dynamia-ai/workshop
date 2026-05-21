@@ -38,6 +38,7 @@ nav:
     - HAMi 集群架构: concepts/hami-architecture.md
   - 安装:
     - "实验1: 在线安装 HAMi": installation/online-install.md
+    - "实验1A: mac 本地 Fake GPU 安装 HAMi": installation/local-fake-gpu-install.md
   - 基础:
     - "实验2: 开启 GPU 节点": basics/enable-gpu.md
     - "实验3: GPU 共享": basics/gpu-sharing.md
