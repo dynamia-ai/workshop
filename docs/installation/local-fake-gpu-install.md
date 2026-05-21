@@ -120,7 +120,7 @@ kubectl label node ${NODE_NAME} run.ai/simulated-gpu-node-pool=default
 安装 fake-gpu-operator：
 
 ```bash
-export FAKE_GPU_OPERATOR_VERSION=v0.0.80
+export FAKE_GPU_OPERATOR_VERSION=0.0.80
 
 helm upgrade -i gpu-operator \
     oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator \
@@ -129,7 +129,7 @@ helm upgrade -i gpu-operator \
     --version ${FAKE_GPU_OPERATOR_VERSION}
 ```
 
-> `v0.0.80` 是 fake-gpu-operator 在 2026-04-12 发布的稳定版本。后续实验时可以从 fake-gpu-operator 的 GitHub Releases 页面选择更新版本。官方 README 使用 OCI Helm Chart：`oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator`。
+> `0.0.80` 是 fake-gpu-operator 在 2026-04-12 发布的稳定版本。后续实验时可以从 fake-gpu-operator 的 GitHub Releases 页面选择更新版本。官方 README 使用 OCI Helm Chart：`oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator`。
 
 等待组件运行：
 
