@@ -17,14 +17,16 @@
 
 ## 安装全景图
 
-整个本地安装过程分 5 步：
+整个本地安装过程分 7 步：
 
 ```mermaid
 flowchart LR
     Step1["步骤1<br/>确认本地环境"] --> Step2["步骤2<br/>安装 fake-gpu-operator"]
     Step2 --> Step3["步骤3<br/>安装 HAMi"]
-    Step3 --> Step4["步骤4<br/>运行模拟 GPU 工作负载"]
-    Step4 --> Step5["步骤5<br/>观察 HAMi 和 fake GPU"]
+    Step3 --> Step4["步骤4<br/>安装 Prometheus"]
+    Step4 --> Step5["步骤5<br/>运行模拟 GPU 工作负载"]
+    Step5 --> Step6["步骤6<br/>安装 HAMi WebUI"]
+    Step6 --> Step7["步骤7<br/>观察 HAMi 和 fake GPU"]
 ```
 
 | 步骤 | 目的 | 解决什么问题 |
@@ -32,7 +34,9 @@ flowchart LR
 | 确认本地环境 | 检查 OrbStack、kubectl、Helm | 确保 Kubernetes 集群可用 |
 | 安装 fake-gpu-operator | 模拟 NVIDIA GPU 资源 | 让无 GPU 节点也能上报 `nvidia.com/gpu` |
 | 安装 HAMi | 部署 HAMi 控制面 | 观察 HAMi scheduler、webhook 等组件 |
+| 安装 Prometheus | 部署监控栈 | 采集 GPU 指标，给 HAMi WebUI 提供数据源 |
 | 运行模拟 GPU 工作负载 | 验证调度链路 | 体验 Pod 申请 GPU 后被调度运行 |
+| 安装 HAMi WebUI | 部署可视化管理界面 | 图形化查看 GPU 节点、资源分配和使用趋势 |
 | 观察 HAMi 和 fake GPU | 理解组件职责边界 | 明确哪些能力需要真实 GPU |
 
 ## 前提条件
@@ -317,13 +321,111 @@ hami         kube-system  1        2026-05-21 16:15:24.295479 +0800 CST deployed
 
 > 两个 Helm Release 都 `deployed`。`gpu-operator` 在 `gpu-operator` 命名空间，`hami` 在 `kube-system` 命名空间。
 
-## 步骤 4: 运行模拟 GPU 工作负载
+## 步骤 4: 安装 Prometheus
+
+HAMi WebUI 需要从 Prometheus 读取 GPU 指标数据。本步骤使用 [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) 部署完整的监控栈。
+
+> **为什么要装 Prometheus？** HAMi WebUI 的集群概览、GPU 利用率、显存使用率等图表数据全部来自 Prometheus。没有 Prometheus，WebUI 只能显示空白页面。
+
+### 4.1 添加 Helm 仓库
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+```
+
+### 4.2 安装 kube-prometheus-stack
+
+```bash
+helm install prometheus prometheus-community/kube-prometheus-stack \
+    -n monitoring --create-namespace \
+    --set grafana.enabled=false \
+    --version=75.15.1
+```
+
+```plaintext
+NAME: prometheus
+LAST DEPLOYED: ...
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+```
+
+> `--set grafana.enabled=false`：不安装 Grafana，本实验只用 Prometheus 作为 HAMi WebUI 的数据源。如果你需要 Grafana 做更丰富的可视化，可以去掉这个参数。
+
+### 4.3 等待 Prometheus 就绪
+
+```bash
+kubectl get pods -n monitoring
+```
+
+输出示例：
+
+```plaintext
+NAME                                                     READY   STATUS    RESTARTS   AGE
+alertmanager-prometheus-kube-prometheus-alertmanager-0   2/2     Running   0          2m
+prometheus-kube-prometheus-operator-d89fb8945-htjjd      1/1     Running   0          2m
+prometheus-kube-state-metrics-7f5f75c85d-mbsbh           1/1     Running   0          2m
+prometheus-prometheus-kube-prometheus-prometheus-0       2/2     Running   0          2m
+prometheus-prometheus-node-exporter-77pxd                1/1     Running   0          2m
+```
+
+> 所有 Pod `Running` 即可。其中 `prometheus-prometheus-kube-prometheus-prometheus-0` 是核心 Prometheus 实例。
+
+### 4.4 创建 ServiceMonitor 采集 GPU 指标
+
+kube-prometheus-stack 自带的 ServiceMonitor 不包含 fake-gpu-operator 的 GPU 指标。需要手动创建：
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: gpu-operator
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  namespaceSelector:
+    matchNames:
+      - gpu-operator
+  endpoints:
+    - port: gpu-metrics
+      path: /metrics
+      interval: 15s
+EOF
+```
+
+```plaintext
+servicemonitor.monitoring.coreos.com/nvidia-dcgm-exporter created
+```
+
+> ServiceMonitor 告诉 Prometheus："去 `gpu-operator` 命名空间找 label 为 `app: nvidia-dcgm-exporter` 的 Service，从它的 `gpu-metrics` 端口每 15 秒采集一次 `/metrics`"。`release: prometheus` label 是 kube-prometheus-stack 的 ServiceMonitor 选择器要求的。
+
+等待约 30 秒后验证 GPU 指标已采集：
+
+```bash
+kubectl exec -n monitoring prometheus-prometheus-kube-prometheus-prometheus-0 -- \
+    promtool query instant http://localhost:9090 'DCGM_FI_DEV_GPU_UTIL'
+```
+
+```plaintext
+DCGM_FI_DEV_GPU_UTIL{..., device="nvidia1", ..., modelName="Tesla-K80", ...} => 0
+DCGM_FI_DEV_GPU_UTIL{..., device="nvidia0", ..., modelName="Tesla-K80", ...} => 0
+```
+
+> 看到 `DCGM_FI_DEV_GPU_UTIL` 数据说明 Prometheus 已经在采集 fake GPU 指标了。利用率为 0 是正常的——当前没有真实 GPU 计算任务在运行。
+
+## 步骤 5: 运行模拟 GPU 工作负载
 
 验证 Kubernetes 可以把申请 `nvidia.com/gpu` 的 Pod 调度到 fake GPU 节点。fake-gpu-operator 会为 GPU Pod 注入模拟 `nvidia-smi` 工具，便于观察 GPU 可见性。
 
 由于本实验没有启用 HAMi device-plugin，HAMi 不会写入真实环境中的 `hami.io/node-nvidia-register` 节点注册信息。因此测试 Pod 会显式绕过 HAMi webhook，使用 Kubernetes 默认调度器和 fake-gpu-operator 提供的模拟 GPU 资源。
 
-### 4.1 创建测试 Pod
+### 5.1 创建测试 Pod
 
 先看一下 Pod YAML：
 
@@ -369,7 +471,7 @@ kubectl apply -f fake-gpu-pod.yaml
 pod/fake-gpu-pod created
 ```
 
-### 4.2 等待 Pod 运行
+### 5.2 等待 Pod 运行
 
 ```bash
 kubectl get pod fake-gpu-pod -o wide
@@ -382,7 +484,7 @@ fake-gpu-pod   1/1     Running   0          7m    192.168.194.22   orbstack   <n
 
 > `STATUS` 为 `Running`，`NODE` 为 `orbstack`，说明 Pod 成功调度到本地节点。如果第一次拉取 `ubuntu:22.04` 镜像，可能需要几十秒。
 
-### 4.3 查看 Pod 的 GPU 资源申请
+### 5.3 查看 Pod 的 GPU 资源申请
 
 ```bash
 kubectl describe pod fake-gpu-pod | grep -A6 "Limits"
@@ -399,7 +501,7 @@ kubectl describe pod fake-gpu-pod | grep -A6 "Limits"
 
 > `Limits` 和 `Requests` 都是 `nvidia.com/gpu: 1`，说明这个 Pod 申请了 1 块 GPU。Kubernetes 只在 requests 和 limits 都设置了 `nvidia.com/gpu` 时才会把 Pod 调度到有 GPU 的节点。
 
-### 4.4 查看节点的 GPU 资源分配情况
+### 5.4 查看节点的 GPU 资源分配情况
 
 ```bash
 kubectl describe node ${NODE_NAME} | grep -A10 "Allocated resources"
@@ -418,7 +520,7 @@ Allocated resources:
 
 > `nvidia.com/gpu` 列显示 Requests 和 Limits 都是 `1`，说明已经有 1 块 GPU 被这个 Pod 占用。节点总共有 2 块 GPU，还可以再分配 1 块给其他 Pod。
 
-### 4.5 执行模拟 nvidia-smi
+### 5.5 执行模拟 nvidia-smi
 
 这是最关键的验证步骤——在 Pod 内执行 `nvidia-smi`，看 fake-gpu-operator 是否成功注入了模拟 GPU 工具：
 
@@ -460,7 +562,103 @@ Thu May 21 08:44:31 2026
 
 > 这就是 fake-gpu-operator 的核心能力：在没有物理 GPU 的机器上，让容器看到 "好像有一块 GPU" 的环境。`nvidia-smi` 输出的所有数据都是模拟的。
 
-## 步骤 5: 观察 HAMi 和 fake GPU 的边界
+## 步骤 6: 安装 HAMi WebUI
+
+HAMi WebUI 提供图形化的 GPU 资源管理界面，可以查看节点 GPU 信息、资源分配率、使用趋势等。
+
+### 6.1 添加 HAMi WebUI Helm 仓库
+
+```bash
+helm repo add hami-webui https://Project-HAMi.github.io/HAMi-WebUI/
+helm repo update
+```
+
+### 6.2 给节点添加 GPU 标签
+
+HAMi WebUI 通过节点标签 `gpu=on` 来发现 GPU 节点：
+
+```bash
+kubectl label node ${NODE_NAME} gpu=on
+```
+
+```plaintext
+node/orbstack labeled
+```
+
+### 6.3 添加模拟 GPU 注册信息
+
+在真实环境中，HAMi device-plugin 会自动在节点上写入 `hami.io/node-nvidia-register` annotation，包含 GPU UUID、型号、显存等信息。由于本实验禁用了 device-plugin（避免与 fake-gpu-operator 冲突），需要手动添加：
+
+```bash
+kubectl annotate node ${NODE_NAME} \
+  hami.io/node-nvidia-register='GPU-3cef3724-8228-5a66-b391-b0901788f5d0,0,11441,100,NVIDIA-Tesla-K80,0,true:GPU-5127182e-f297-5a25-bb44-0444c3be540c,1,11441,100,NVIDIA-Tesla-K80,0,true:' \
+  hami.io/node-handshake="Requesting_$(date '+%Y.%m.%d %H:%M:%S')"
+```
+
+> annotation 格式说明：每块 GPU 用冒号分隔，字段含义为 `GPU-<UUID>,<索引>,<显存MiB>,<算力>,<型号>,<NUMA节点>,<是否健康>`。这里的 UUID 和显存值来自 fake-gpu-operator 的 dcgm-exporter 指标。
+
+### 6.4 安装 HAMi WebUI
+
+```bash
+helm install my-hami-webui hami-webui/hami-webui \
+    --set externalPrometheus.enabled=true \
+    --set externalPrometheus.address="http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090" \
+    --set dcgm-exporter.enabled=false \
+    -n kube-system
+```
+
+```plaintext
+NAME: my-hami-webui
+LAST DEPLOYED: ...
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 1
+```
+
+> 参数说明：
+>
+> - `externalPrometheus.enabled=true`：使用外部 Prometheus（即步骤 4 安装的 kube-prometheus-stack）
+> - `externalPrometheus.address`：Prometheus 的集群内 Service 地址
+> - `dcgm-exporter.enabled=false`：不安装额外的 dcgm-exporter，fake-gpu-operator 已经自带了
+
+### 6.5 等待 WebUI 就绪
+
+```bash
+kubectl get pods -n kube-system | grep webui
+```
+
+```plaintext
+my-hami-webui-85686fd65-77crx            2/2     Running   0          2m
+```
+
+> `2/2` 表示前端（FE）和后端（BE）两个容器都正常运行。如果遇到 `ErrImagePull`，可能是 Docker Hub 网络问题，等几分钟自动重试即可。
+
+### 6.6 访问 WebUI
+
+通过端口转发在本地访问：
+
+```bash
+kubectl -n kube-system port-forward svc/my-hami-webui 8080:3000
+```
+
+浏览器打开 `http://localhost:8080/admin/vgpu/monitor/overview`，可以看到集群概览页面：
+
+![HAMi WebUI 集群概览](../screenshot/hami-webui-overview.png)
+
+> 集群概览页面展示：
+>
+> - **节点总数**: 1，**GPU 卡数**: 2
+> - **资源概览**: CPU 总核、内存总量、GPU 显存总量
+> - **GPU 类型分布**: 显示模拟的 Tesla-K80
+> - **GPU 算力/显存趋势图**: 来自 Prometheus 的 DCGM 指标
+
+点击左侧菜单「节点管理」查看 GPU 节点详情：
+
+![HAMi WebUI 节点管理](../screenshot/hami-webui-nodes.png)
+
+> 节点管理页面可以看到每个节点的 GPU 设备列表、显存分配情况和运行的工作负载。
+
+## 步骤 7: 观察 HAMi 和 fake GPU 的边界
 
 ### HAMi 在本实验中负责什么
 
@@ -536,10 +734,23 @@ kubectl delete pod fake-gpu-pod
 pod "fake-gpu-pod" deleted
 ```
 
+卸载 HAMi WebUI：
+
+```bash
+helm uninstall my-hami-webui -n kube-system
+```
+
 卸载 HAMi：
 
 ```bash
 helm uninstall hami -n kube-system
+```
+
+卸载 Prometheus：
+
+```bash
+helm uninstall prometheus -n monitoring
+kubectl delete namespace monitoring
 ```
 
 卸载 fake-gpu-operator：
@@ -549,7 +760,14 @@ helm uninstall gpu-operator -n gpu-operator
 kubectl delete namespace gpu-operator
 ```
 
-> 如果想保留环境继续实验，可以跳过清理。HAMi 和 fake-gpu-operator 占用资源不多。
+清理节点标签和 annotation：
+
+```bash
+kubectl label node ${NODE_NAME} gpu- run.ai/simulated-gpu-node-pool-
+kubectl annotate node ${NODE_NAME} hami.io/node-nvidia-register- hami.io/node-handshake-
+```
+
+> 如果想保留环境继续实验，可以跳过清理。
 
 ## 下一步
 
