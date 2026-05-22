@@ -1,2 +1,31 @@
 .venv/
 site/
+
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+env/
+
+# MkDocs
+.cache/
+
+# Local environment files
+.env
+.env.*
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
